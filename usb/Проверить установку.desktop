@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Проверить установку
+Name[ru]=Проверить установку
+Comment=Проверить, что русская раскладка включается по умолчанию
+Comment[ru]=Проверить, что русская раскладка включается по умолчанию
+Icon=dialog-information
+Exec=sh -c "exec bash \\"\\$(dirname \\"\\$0\\")/app/usb-launcher.sh\\" check" %k
+Terminal=false
+StartupNotify=false

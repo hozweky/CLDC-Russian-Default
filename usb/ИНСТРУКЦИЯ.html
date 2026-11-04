@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Русская раскладка по умолчанию</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1d2330; --muted: #5b6475; --line: #dde1e8;
+    --accent: #2f6fd6; --accent-soft: #e6eefc; --ok: #1f8a4c; --ok-soft: #e4f5ea;
+    --err: #c23b32; --err-soft: #fbe9e7; --screen: #20252f; --paper: #fbfbfc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181e; --card: #1e232b; --ink: #e9ecf1; --muted: #a3abb9; --line: #333a46;
+      --accent: #6fa0ff; --accent-soft: #23314a; --ok: #4cc27f; --ok-soft: #1b3326;
+      --err: #ff7a6e; --err-soft: #3a2220; --screen: #0e1116; --paper: #262c36;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 18px/1.5 "Noto Sans", "DejaVu Sans", "Segoe UI", Arial, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 8px 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 20px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+  .badge { background: var(--ok-soft); color: var(--ok); border-radius: 999px; padding: 4px 12px;
+    font-size: 15px; font-weight: 600; }
+  .step { display: grid; grid-template-columns: 220px 1fr; gap: 20px; align-items: center;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+    margin-bottom: 14px; break-inside: avoid; }
+  .step svg { width: 100%; height: auto; display: block; }
+  .num { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-weight: 700; margin-right: 10px; flex: none; }
+  .step h2 { display: flex; align-items: center; font-size: 22px; margin: 0 0 6px; }
+  .step p { margin: 6px 0; }
+  .tip { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; margin-top: 10px;
+    font-size: 16px; }
+  .ok { color: var(--ok); font-weight: 700; }
+  .err { color: var(--err); font-weight: 700; }
+  kbd, code { font-family: "DejaVu Sans Mono", Consolas, monospace; font-size: 16px;
+    background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+  pre { background: var(--screen); color: #e8f0ff; border-radius: 10px; padding: 12px 14px;
+    font: 16px/1.4 "DejaVu Sans Mono", Consolas, monospace; overflow-x: auto; }
+  h3 { font-size: 22px; margin: 32px 0 10px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .box h4 { margin: 0 0 6px; font-size: 18px; }
+  .box ol { margin: 6px 0 0; padding-left: 22px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 14px;
+    overflow: hidden; border: 1px solid var(--line); }
+  td { padding: 10px 12px; border-top: 1px solid var(--line); vertical-align: top; font-size: 16px; }
+  tr:first-child td { border-top: 0; }
+  td:first-child { width: 42%; font-weight: 600; }
+  .foot { color: var(--muted); font-size: 15px; margin-top: 24px; }
+  /* цвета рисунков */
+  .s-line { stroke: var(--ink); } .s-fill { fill: var(--card); } .s-acc { fill: var(--accent); }
+  .s-accs { stroke: var(--accent); } .s-ok { fill: var(--ok); } .s-soft { fill: var(--accent-soft); }
+  .s-screen { fill: var(--screen); } .s-muted { fill: var(--muted); } .s-paper { fill: var(--paper); }
+  .s-text { fill: var(--ink); font: 600 13px "DejaVu Sans", Arial, sans-serif; }
+  .s-wtext { fill: #fff; font: 600 12px "DejaVu Sans", Arial, sans-serif; }
+  .s-gtext { fill: #5fe08f; font: 700 13px "DejaVu Sans Mono", monospace; }
+  @media (max-width: 640px) {
+    .step { grid-template-columns: 1fr; }
+    .step svg { max-width: 260px; margin: 0 auto; }
+    .grid2 { grid-template-columns: 1fr; }
+    td:first-child { width: auto; }
+  }
+  @media print { body { background: #fff; } .step, .box { border-color: #bbb; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Русская раскладка по умолчанию</h1>
+  <p class="lead">Ноутбуки «Гравитон», Calculate Linux Desktop Cinnamon. Около 1 минуты на ноутбук.</p>
+  <div class="badges">
+    <span class="badge">Без пароля</span><span class="badge">Без sudo</span>
+    <span class="badge">Без интернета</span><span class="badge">Пользователь guest</span>
+  </div>
+
+  <section class="step">
+    <svg viewBox="0 0 220 140" aria-hidden="true">
+      <rect x="30" y="20" width="140" height="88" rx="8" class="s-screen"/>
+      <rect x="14" y="108" width="172" height="12" rx="4" class="s-paper s-line" stroke-width="2"/>
+      <rect x="168" y="86" width="40" height="16" rx="3" class="s-acc"/>
+      <rect x="160" y="90" width="10" height="8" class="s-muted"/>
+      <path d="M150 94 h6" class="s-line" stroke-width="3" stroke-linecap="round"/>
+      <text x="100" y="70" text-anchor="middle" class="s-wtext">guest</text>
+    </svg>
+    <div>
+      <h2><span class="num">1</span>Вставьте флешку</h2>
+      <p>Войдите в систему пользователем <b>guest</b>. Вставьте флешку и откройте её: значок появится на рабочем столе или в программе «Файлы».</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <svg viewBox="0 0 220 140" aria-hidden="true">
+      <rect x="8" y="22" width="80" height="96" rx="8" class="s-soft"/>
+      <text x="48" y="40" text-anchor="middle" class="s-text">Флешка</text>
+      <path d="M26 60 h16 l6 6 h20 v32 h-42z" class="s-acc"/>
+      <rect x="128" y="22" width="84" height="96" rx="8" class="s-paper s-line" stroke-width="2"/>
+      <text x="170" y="40" text-anchor="middle" class="s-text">Рабочий стол</text>
+      <path d="M150 60 h16 l6 6 h20 v32 h-42z" class="s-acc"/>
+      <path d="M78 80 C 100 60, 118 60, 138 74" fill="none" class="s-accs" stroke-width="4" stroke-dasharray="6 5"/>
+      <path d="M131 64 l10 11 -14 3" fill="none" class="s-accs" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div>
+      <h2><span class="num">2</span>Скопируйте папку на рабочий стол</h2>
+      <p>Перетащите папку <b>CLDC-Russian-Default-USB</b> с флешки на рабочий стол.</p>
+      <div class="tip">Запускайте копию с рабочего стола, а не с флешки: флешки из Windows не хранят разрешения Linux на запуск.</div>
+    </div>
+  </section>
+
+  <section class="step">
+    <svg viewBox="0 0 220 140" aria-hidden="true">
+      <rect x="8" y="10" width="204" height="120" rx="10" class="s-paper s-line" stroke-width="2"/>
+      <rect x="34" y="30" width="58" height="50" rx="8" class="s-acc"/>
+      <rect x="46" y="44" width="34" height="22" rx="3" class="s-fill"/>
+      <path d="M50 51 h4 M58 51 h4 M66 51 h4 M74 51 h2 M50 59 h26" class="s-line" stroke-width="3"/>
+      <text x="63" y="100" text-anchor="middle" class="s-text">Установить</text>
+      <rect x="128" y="30" width="58" height="50" rx="8" class="s-muted" opacity=".55"/>
+      <text x="157" y="100" text-anchor="middle" class="s-text">Проверить…</text>
+      <path d="M84 40 l0 30 8 -8 6 13 6 -3 -6 -13 11 0z" class="s-fill s-line" stroke-width="2" stroke-linejoin="round"/>
+      <text x="108" y="46" class="s-text">×2</text>
+    </svg>
+    <div>
+      <h2><span class="num">3</span>Дважды щёлкните «Установить»</h2>
+      <p>Откройте папку на рабочем столе и дважды щёлкните значок <b>«Установить»</b> (с клавиатурой).</p>
+      <div class="tip">Если появилось окно о <b>ненадёжном значке запуска</b> — нажмите <b>«Пометить как доверенный»</b> (или «Всё равно запустить»). Названия кнопок могут немного отличаться.</div>
+    </div>
+  </section>
+
+  <section class="step">
+    <svg viewBox="0 0 220 140" aria-hidden="true">
+      <rect x="8" y="10" width="204" height="120" rx="10" class="s-screen"/>
+      <rect x="8" y="10" width="204" height="18" rx="9" class="s-muted"/>
+      <rect x="22" y="44" width="176" height="44" rx="4" fill="none" stroke="#5fe08f" stroke-width="2"/>
+      <text x="110" y="72" text-anchor="middle" class="s-gtext">ГОТОВО!</text>
+      <text x="22" y="112" class="s-wtext">Нажмите Enter…</text>
+    </svg>
+    <div>
+      <h2><span class="num">4</span>Дождитесь надписи «ГОТОВО!»</h2>
+      <p>Откроется окно с текстом. <span class="ok">Зелёная рамка «ГОТОВО! Установка выполнена успешно»</span> — всё хорошо, нажмите <kbd>Enter</kbd>.</p>
+      <p><span class="err">Красная рамка «ОШИБКА»</span> — окно не закроется само. Прочитайте причину и посмотрите таблицу ниже.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <svg viewBox="0 0 220 140" aria-hidden="true">
+      <circle cx="110" cy="70" r="46" class="s-soft"/>
+      <path d="M88 52 A 30 30 0 1 0 132 52" fill="none" class="s-accs" stroke-width="8" stroke-linecap="round"/>
+      <path d="M110 34 v34" class="s-accs" stroke-width="8" stroke-linecap="round"/>
+    </svg>
+    <div>
+      <h2><span class="num">5</span>Перезагрузите ноутбук</h2>
+      <p>Меню → Выход → <b>Перезагрузить</b>. Войдите как <b>guest</b>.</p>
+      <p>Не переключая раскладку, откройте Chrome или LibreOffice и напечатайте что-нибудь — появятся <b>русские буквы</b>. <kbd>Super</kbd> + <kbd>Пробел</kbd> переключает на английский.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <svg viewBox="0 0 220 140" aria-hidden="true">
+      <circle cx="110" cy="70" r="46" class="s-ok"/>
+      <path d="M88 71 l15 15 30 -32" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div>
+      <h2><span class="num">6</span>По желанию: «Проверить установку»</h2>
+      <p>В той же папке дважды щёлкните <b>«Проверить установку»</b>. Должно быть: <span class="ok">«ВСЁ В ПОРЯДКЕ»</span>.</p>
+    </div>
+  </section>
+
+  <h3>Если двойной щелчок не запускает установку</h3>
+  <p>Например, открывается текст файла или ничего не происходит. Системную защиту отключать не нужно.</p>
+  <div class="grid2">
+    <div class="box">
+      <h4>Способ А: разрешить запуск одного файла</h4>
+      <ol>
+        <li>Правый щелчок по «Установить» → <b>«Свойства»</b>.</li>
+        <li>Вкладка <b>«Права»</b>.</li>
+        <li>Галочка <b>«Разрешить выполнение файла как программы»</b>.</li>
+        <li>Закройте окно и снова дважды щёлкните «Установить».</li>
+      </ol>
+    </div>
+    <div class="box">
+      <h4>Способ Б: через терминал (работает всегда)</h4>
+      <ol>
+        <li>Откройте папку CLDC-Russian-Default-USB на рабочем столе.</li>
+        <li>Правый щелчок по пустому месту → <b>«Открыть в терминале»</b>.</li>
+        <li>Напечатайте латиницей и нажмите <kbd>Enter</kbd>:</li>
+      </ol>
+      <pre>bash app/usb-launcher.sh install</pre>
+      Проверка: <code>bash app/usb-launcher.sh check</code>
+    </div>
+  </div>
+
+  <h3>Если что-то не так</h3>
+  <table>
+    <tr><td>«запущено от имени root»</td><td>Выйдите и войдите пользователем guest, запустите снова.</td></tr>
+    <tr><td>«не найден файл программы»</td><td>Папка скопирована не полностью. Скопируйте всю папку вместе с папкой <code>app</code>.</td></tr>
+    <tr><td>«ключ … недоступен для записи»</td><td>Настройку заблокировал администратор. Обратитесь к администратору.</td></tr>
+    <tr><td>После перезагрузки «Проверить установку» пишет «НЕ УСТАНОВЛЕНО»</td><td>Профиль guest очищается при каждом выходе, установка в профиль не сохраняется. Обратитесь к администратору.</td></tr>
+    <tr><td>Где отчёт последнего запуска</td><td><code>~/.local/state/cldc-russian-default/</code>, файлы <code>usb-install-report.txt</code> и <code>usb-check-report.txt</code>.</td></tr>
+  </table>
+
+  <h3>Как удалить и вернуть всё как было</h3>
+  <p>В терминале:</p>
+  <pre>~/.local/bin/cldc-russian-default uninstall --restore</pre>
+
+  <p class="foot">Не открывайте и не сохраняйте файлы из этой папки в Блокноте Windows: это может испортить их для Linux.</p>
+</main>
+</body>
+</html>

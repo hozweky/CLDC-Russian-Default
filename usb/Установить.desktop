@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Установить
+Name[ru]=Установить
+Comment=Включить русскую раскладку по умолчанию (без пароля)
+Comment[ru]=Включить русскую раскладку по умолчанию (без пароля)
+Icon=input-keyboard
+Exec=sh -c "exec bash \\"\\$(dirname \\"\\$0\\")/app/usb-launcher.sh\\" install" %k
+Terminal=false
+StartupNotify=false

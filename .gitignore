@@ -19,3 +19,6 @@
 Thumbs.db
 .vscode/
 .idea/
+
+# Собранный USB-пакет (собирается: bash usb/build-usb.sh)
+dist/
