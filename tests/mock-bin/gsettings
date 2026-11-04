@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Упрощённый мок gsettings для тестов.
+# Значение ключа хранится в файле $MOCK_GS_DIR/<схема>/<ключ>,
+# файл $MOCK_GS_DIR/<схема>/.ro-<ключ> делает ключ недоступным для записи.
+# Каждая запись дописывается в $MOCK_GS_DIR/.setlog.
+set -u
+d=${MOCK_GS_DIR:?MOCK_GS_DIR не задан}
+
+case ${1:-} in
+  list-schemas)
+    for s in "$d"/*/; do [[ -d $s ]] && basename "$s"; done
+    ;;
+  list-keys)
+    [[ -d $d/${2:-} ]] || { echo "No such schema" >&2; exit 1; }
+    for k in "$d/$2"/*; do [[ -f $k ]] && basename "$k"; done
+    ;;
+  get)
+    [[ -f $d/${2:-}/${3:-} ]] || { echo "No such key" >&2; exit 1; }
+    cat "$d/$2/$3"
+    ;;
+  writable)
+    [[ -f $d/${2:-}/${3:-} ]] || exit 1
+    if [[ -e $d/$2/.ro-$3 ]]; then echo false; else echo true; fi
+    ;;
+  set)
+    f=$d/${2:-}/${3:-}
+    [[ -f $f && $# -eq 4 ]] || exit 1
+    [[ -e $d/$2/.ro-$3 ]] && exit 1
+    val=$4
+    # как настоящий gsettings: для uint32 печатается тип
+    if [[ $(cat "$f") == uint32\ * && $val != uint32\ * ]]; then val="uint32 $val"; fi
+    printf '%s\n' "$val" >"$f"
+    printf '%s %s\n' "$2" "$3" >>"$d/.setlog"
+    ;;
+  *)
+    echo "mock gsettings: unsupported: $*" >&2
+    exit 1
+    ;;
+esac

@@ -1,0 +1,776 @@
+#!/usr/bin/env bash
+# cldc-russian-default-marker
+# CLDC-Russian-Default — русская раскладка (RU) по умолчанию при каждом входе в Cinnamon.
+# Целевая система: Calculate Linux Desktop Cinnamon (x86_64), пользователь guest.
+# Работает только с GSettings текущего пользователя: без sudo, без GUI,
+# без изменения системной локали, XKB-опций, сочетаний клавиш, сети и загрузчика.
+#
+# Команды: install | apply | status | uninstall | restore | help | version
+
+set -uo pipefail
+
+readonly APP_NAME="cldc-russian-default"
+readonly APP_VERSION="1.0.0"
+readonly MARKER="cldc-russian-default-marker"
+
+# Схемы GSettings
+readonly S_IS="org.cinnamon.desktop.input-sources"      # Cinnamon 6.x (X11 и Wayland)
+readonly S_KBD="org.gnome.libgnomekbd.keyboard"         # старые версии Cinnamon (X11)
+readonly S_KBD_DESK="org.gnome.libgnomekbd.desktop"
+readonly S_KEYS="org.cinnamon.desktop.keybindings.wm"   # только чтение (Super+Space)
+
+# Единственные ключи, которые утилита может менять, сохранять и восстанавливать.
+readonly MANAGED_KEYS=(
+  "$S_IS sources"
+  "$S_IS current"
+  "$S_IS mru-sources"
+  "$S_KBD layouts"
+  "$S_KBD_DESK default-group"
+)
+
+GS_BIN="${CLDC_GSETTINGS:-gsettings}"
+GS_SCHEMAS=""
+BACKEND=""
+PLAN=()
+QUIET=0
+DRY_RUN=0
+
+# ---------------------------------------------------------------- пути и вывод
+
+init_paths() {
+  : "${HOME:?Переменная HOME не задана}"
+  CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+  STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/$APP_NAME"
+  BACKUP_DIR="$STATE_DIR/backups"
+  LOG_FILE="$STATE_DIR/$APP_NAME.log"
+  INSTALL_PATH="$HOME/.local/bin/$APP_NAME"
+  AUTOSTART_FILE="$CONFIG_HOME/autostart/$APP_NAME.desktop"
+}
+
+log_line() {
+  [[ -n ${STATE_DIR:-} ]] || return 0
+  mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+  printf '%s [%s] %s\n' "$(date '+%F %T')" "$$" "$*" >>"$LOG_FILE" 2>/dev/null || true
+}
+say()  { (( QUIET )) || printf '%s\n' "$*"; log_line "$*"; }
+warn() { (( QUIET )) || printf 'ВНИМАНИЕ: %s\n' "$*" >&2; log_line "ВНИМАНИЕ: $*"; }
+die()  { printf 'ОШИБКА: %s\n' "$1" >&2; log_line "ОШИБКА: $1"; exit "${2:-1}"; }
+
+trim_log() {
+  [[ -f $LOG_FILE ]] || return 0
+  local n
+  n=$(wc -l <"$LOG_FILE" 2>/dev/null) || return 0
+  if (( n > 1000 )); then
+    tail -n 500 "$LOG_FILE" >"$LOG_FILE.tmp" 2>/dev/null && mv -f "$LOG_FILE.tmp" "$LOG_FILE"
+  fi
+}
+
+check_not_root() {
+  (( EUID != 0 )) || [[ ${CLDC_ALLOW_ROOT:-0} == 1 ]] ||
+    die "Не запускайте от root/sudo: утилита работает с профилем текущего пользователя (guest)."
+}
+
+acquire_lock() {
+  mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+  command -v flock >/dev/null 2>&1 || return 0
+  exec 9>>"$STATE_DIR/.lock" || return 0
+  flock -w 60 9 || die "Другой экземпляр $APP_NAME всё ещё работает."
+}
+
+# ---------------------------------------------------------------- gsettings
+
+gs_init() {
+  command -v "$GS_BIN" >/dev/null 2>&1 || return 1
+  GS_SCHEMAS=$("$GS_BIN" list-schemas 2>/dev/null) || return 1
+  [[ -n $GS_SCHEMAS ]]
+}
+has_schema() { grep -qxF -- "$1" <<<"$GS_SCHEMAS"; }
+has_key() {
+  has_schema "$1" || return 1
+  local keys
+  keys=$("$GS_BIN" list-keys "$1" 2>/dev/null) || return 1
+  grep -qxF -- "$2" <<<"$keys"
+}
+gs_get() { "$GS_BIN" get "$1" "$2" 2>/dev/null; }
+gs_writable() { [[ $("$GS_BIN" writable "$1" "$2" 2>/dev/null) == true ]]; }
+gs_set() {
+  local schema=$1 key=$2 value=$3
+  if ! gs_writable "$schema" "$key"; then
+    warn "Ключ $schema $key недоступен для записи (заблокирован администратором?) — пропуск."
+    return 1
+  fi
+  if (( DRY_RUN )); then
+    say "  [пробный запуск] $schema $key -> $value"
+    return 0
+  fi
+  if ! "$GS_BIN" set "$schema" "$key" "$value" 2>/dev/null; then
+    warn "Не удалось записать $schema $key = $value"
+    return 1
+  fi
+  log_line "Записано: $schema $key = $value"
+}
+is_managed() {
+  local item
+  for item in "${MANAGED_KEYS[@]}"; do [[ $item == "$1 $2" ]] && return 0; done
+  return 1
+}
+# "uint32 0" -> 0, "-1" -> -1
+int_value() {
+  local v=${1##* }
+  [[ $v =~ ^-?[0-9]+$ ]] && printf '%s' "$v"
+}
+
+# ---------------------------------------------------------------- окружение
+
+is_cinnamon_session() {
+  local d="${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}"
+  [[ ${d,,} == *cinnamon* ]]
+}
+
+session_type() {
+  if [[ -n ${XDG_SESSION_TYPE:-} ]]; then printf '%s' "$XDG_SESSION_TYPE"
+  elif [[ -n ${WAYLAND_DISPLAY:-} ]]; then printf 'wayland'
+  elif [[ -n ${DISPLAY:-} ]]; then printf 'x11'
+  else printf 'unknown'
+  fi
+}
+
+can_query_xkb() {
+  [[ $(session_type) != wayland && -n ${DISPLAY:-} ]] && command -v setxkbmap >/dev/null 2>&1
+}
+
+# Раскладки, которые сейчас активны в X-сервере (только чтение, только X11).
+# Нужны, когда список Cinnamon пуст, чтобы не потерять системные раскладки.
+# $1 — разделитель раскладки и варианта: "+" (input-sources) или '\t' (libgnomekbd).
+system_layouts() {
+  can_query_xkb || return 0
+  local q layouts variants k id
+  q=$(setxkbmap -query 2>/dev/null) || return 0
+  layouts=$(awk '/^layout:/ {print $2}' <<<"$q")
+  variants=$(awk '/^variant:/ {print $2}' <<<"$q")
+  local -a L V
+  IFS=, read -ra L <<<"$layouts"
+  IFS=, read -ra V <<<"$variants"
+  for k in "${!L[@]}"; do
+    id=${L[k]}
+    [[ -n $id ]] || continue
+    [[ -n ${V[k]:-} ]] && id+="$1${V[k]}"
+    printf 'xkb\t%s\n' "$id"
+  done
+}
+
+# ---------------------------------------------------------------- разбор и порядок
+
+# "[('xkb', 'us'), ('xkb', 'ru')]" -> строки "xkb<TAB>us". Код 1 — формат не распознан.
+parse_sources() {
+  local v=$1 re="^[[:space:]]*\('([^']*)',[[:space:]]*'([^']*)'\)[[:space:]]*,?(.*)$"
+  v=${v#'@a(ss) '}
+  [[ $v == \[*\] ]] || return 1
+  v=${v#\[}
+  v=${v%\]}
+  while [[ $v =~ $re ]]; do
+    printf '%s\t%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    v=${BASH_REMATCH[3]}
+  done
+  [[ -z ${v//[[:space:]]/} ]]
+}
+
+# "['us', 'ru\tphonetic']" -> строки "xkb<TAB>us". Код 1 — формат не распознан.
+parse_strv() {
+  local v=$1 re="^[[:space:]]*'([^']*)'[[:space:]]*,?(.*)$"
+  v=${v#'@as '}
+  [[ $v == \[*\] ]] || return 1
+  v=${v#\[}
+  v=${v%\]}
+  while [[ $v =~ $re ]]; do
+    printf 'xkb\t%s\n' "${BASH_REMATCH[1]}"
+    v=${BASH_REMATCH[2]}
+  done
+  [[ -z ${v//[[:space:]]/} ]]
+}
+
+format_sources() {
+  local t i out="" sep=""
+  while IFS=$'\t' read -r t i; do
+    [[ -n $t ]] || continue
+    out+="$sep('$t', '$i')"
+    sep=", "
+  done
+  printf '[%s]' "$out"
+}
+
+format_strv() {
+  local t i out="" sep=""
+  while IFS=$'\t' read -r t i; do
+    [[ -n $t ]] || continue
+    out+="$sep'$i'"
+    sep=", "
+  done
+  printf '[%s]' "$out"
+}
+
+# Индекс раскладки $1 (ru/us) в массивах _T/_I: сначала точное совпадение, потом вариант.
+find_layout() {
+  local base=$1 k
+  for k in "${!_T[@]}"; do
+    [[ ${_T[k]} == xkb && ${_I[k]} == "$base" ]] && { printf '%s' "$k"; return 0; }
+  done
+  for k in "${!_T[@]}"; do
+    [[ ${_T[k]} == xkb && ( ${_I[k]} == "$base+"* || ${_I[k]} == "$base\\t"* ) ]] &&
+      { printf '%s' "$k"; return 0; }
+  done
+  printf '%s' -1
+}
+
+# stdin: "тип<TAB>id" -> stdout: RU первой, US второй, остальные в прежнем порядке.
+reorder_entries() {
+  local -a _T=() _I=()
+  local t i k ru us
+  while IFS=$'\t' read -r t i; do
+    [[ -n $t ]] || continue
+    _T+=("$t")
+    _I+=("$i")
+  done
+  ru=$(find_layout ru)
+  us=$(find_layout us)
+  if (( ru >= 0 )); then printf '%s\t%s\n' "${_T[ru]}" "${_I[ru]}"; else printf 'xkb\tru\n'; fi
+  if (( us >= 0 )); then printf '%s\t%s\n' "${_T[us]}" "${_I[us]}"; else printf 'xkb\tus\n'; fi
+  for k in "${!_T[@]}"; do
+    (( k == ru || k == us )) && continue
+    printf '%s\t%s\n' "${_T[k]}" "${_I[k]}"
+  done
+}
+
+desired_sources() {
+  local entries
+  entries=$(parse_sources "$1") || return 1
+  [[ -n $entries ]] || entries=$(system_layouts '+')
+  reorder_entries <<<"$entries" | format_sources
+}
+
+desired_strv() {
+  local entries
+  entries=$(parse_strv "$1") || return 1
+  [[ -n $entries ]] || entries=$(system_layouts '\t')
+  reorder_entries <<<"$entries" | format_strv
+}
+
+first_entry() {
+  local e
+  e=$(parse_sources "$1") || return 1
+  printf '%s' "${e%%$'\n'*}"
+}
+
+# ---------------------------------------------------------------- план изменений
+
+detect_backend() {
+  if has_key "$S_IS" sources; then BACKEND="input-sources"
+  elif has_key "$S_KBD" layouts; then BACKEND="libgnomekbd"
+  else BACKEND="none"
+  fi
+}
+
+backend_label() {
+  case $BACKEND in
+    input-sources) printf '%s (sources/current)' "$S_IS" ;;
+    libgnomekbd) printf '%s (layouts, старый Cinnamon)' "$S_KBD" ;;
+    *) printf 'не найден' ;;
+  esac
+}
+
+plan_add() { PLAN+=("$1"$'\t'"$2"$'\t'"$3"); }
+plan_has() {
+  local item
+  for item in "${PLAN[@]}"; do [[ $item == *$'\t'"$1"$'\t'* ]] && return 0; done
+  return 1
+}
+
+# Заполняет PLAN списком "схема<TAB>ключ<TAB>значение". Код 1 — не удалось прочитать.
+build_plan() {
+  PLAN=()
+  local cur want v
+  case $BACKEND in
+    input-sources)
+      cur=$(gs_get "$S_IS" sources) || { warn "Не удалось прочитать $S_IS sources."; return 1; }
+      want=$(desired_sources "$cur") ||
+        { warn "Неизвестный формат $S_IS sources: $cur — изменения не вносятся."; return 1; }
+      [[ $(parse_sources "$cur" | format_sources) == "$want" ]] || plan_add "$S_IS" sources "$want"
+
+      if has_key "$S_IS" current; then
+        v=$(int_value "$(gs_get "$S_IS" current)")
+        [[ $v == 0 ]] || plan_add "$S_IS" current 0
+      fi
+
+      # Если Cinnamon хранит «недавно использованные» источники, RU должна быть в них первой.
+      if has_key "$S_IS" mru-sources; then
+        cur=$(gs_get "$S_IS" mru-sources)
+        if v=$(first_entry "$cur"); then
+          [[ -z $v || $v == "$(first_entry "$want")" ]] || plan_add "$S_IS" mru-sources "$want"
+        fi
+      fi
+      ;;
+    libgnomekbd)
+      cur=$(gs_get "$S_KBD" layouts) || { warn "Не удалось прочитать $S_KBD layouts."; return 1; }
+      want=$(desired_strv "$cur") ||
+        { warn "Неизвестный формат $S_KBD layouts: $cur — изменения не вносятся."; return 1; }
+      [[ $(parse_strv "$cur" | format_strv) == "$want" ]] || plan_add "$S_KBD" layouts "$want"
+
+      # Раскладка для новых окон: индекс >0 указывал бы не на RU.
+      if has_key "$S_KBD_DESK" default-group; then
+        v=$(int_value "$(gs_get "$S_KBD_DESK" default-group)")
+        [[ -n $v ]] && (( v > 0 )) && plan_add "$S_KBD_DESK" default-group 0
+      fi
+      ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
+# ---------------------------------------------------------------- резервные копии
+
+backup_settings() {
+  mkdir -p "$BACKUP_DIR" || return 1
+  local f item schema key
+  f="$BACKUP_DIR/$(date +%Y%m%d-%H%M%S)-$$.tsv"
+  [[ -e $f ]] && f="${f%.tsv}-$RANDOM.tsv"
+  {
+    printf '# %s %s: резервная копия от %s\n' "$APP_NAME" "$APP_VERSION" "$(date '+%F %T')"
+    for item in "${MANAGED_KEYS[@]}"; do
+      schema=${item% *}
+      key=${item#* }
+      has_key "$schema" "$key" || continue
+      printf '%s\t%s\t%s\n' "$schema" "$key" "$(gs_get "$schema" "$key")"
+    done
+  } >"$f" || return 1
+  [[ -e $BACKUP_DIR/original.tsv ]] || cp -- "$f" "$BACKUP_DIR/original.tsv"
+  rotate_backups
+  printf '%s' "$f"
+}
+
+rotate_backups() {
+  local -a files=()
+  local f i excess
+  for f in "$BACKUP_DIR"/[0-9]*.tsv; do [[ -f $f ]] && files+=("$f"); done
+  excess=$(( ${#files[@]} - ${CLDC_KEEP_BACKUPS:-20} ))
+  for (( i = 0; i < excess; i++ )); do rm -f -- "${files[i]}"; done
+}
+
+latest_backup() {
+  local f last=""
+  for f in "$BACKUP_DIR"/[0-9]*.tsv; do [[ -f $f ]] && last=$f; done
+  printf '%s' "$last"
+}
+
+restore_from() {
+  local f=$1 schema key value rc=0 n=0 b
+  grep -q "^# $APP_NAME" "$f" || die "Файл не похож на резервную копию $APP_NAME: $f"
+  b=$(backup_settings) || die "Не удалось сохранить текущее состояние перед восстановлением."
+  say "Текущее состояние сохранено: $b"
+  while IFS=$'\t' read -r schema key value; do
+    [[ -z $schema || $schema == \#* ]] && continue
+    is_managed "$schema" "$key" || { warn "Пропуск постороннего ключа: $schema $key"; continue; }
+    has_key "$schema" "$key" || continue
+    [[ $(gs_get "$schema" "$key") == "$value" ]] && continue
+    if gs_set "$schema" "$key" "$value"; then
+      say "  восстановлено: $schema $key = $value"
+      (( n++ ))
+    else
+      rc=1
+    fi
+  done <"$f"
+  (( n > 0 )) || say "Значения уже совпадают с резервной копией."
+  return $rc
+}
+
+# ---------------------------------------------------------------- применение
+
+# 0 — всё в порядке, 1 — ошибка, 2 — нет поддерживаемых схем.
+run_apply() {
+  detect_backend
+  if [[ $BACKEND == none ]]; then
+    warn "Не найдены схемы раскладок Cinnamon ($S_IS или $S_KBD). Ничего не изменено."
+    return 2
+  fi
+  say "Механизм раскладок: $(backend_label)"
+  build_plan || return 1
+  if (( ${#PLAN[@]} == 0 )); then
+    say "Уже настроено: RU первая, US вторая, активна RU."
+    return 0
+  fi
+
+  local b item schema key value rc=0
+  if (( DRY_RUN )); then
+    say "Пробный запуск, будут изменены:"
+  else
+    b=$(backup_settings) || { warn "Не удалось создать резервную копию — изменения не вносятся."; return 1; }
+    say "Резервная копия: $b"
+  fi
+  for item in "${PLAN[@]}"; do
+    IFS=$'\t' read -r schema key value <<<"$item"
+    if gs_set "$schema" "$key" "$value"; then
+      (( DRY_RUN )) || say "  $schema $key = $value"
+    else
+      rc=1
+    fi
+  done
+  (( DRY_RUN )) && return $rc
+
+  build_plan || return 1
+  if (( ${#PLAN[@]} > 0 )); then
+    warn "После записи значения не совпали с ожидаемыми (нет сессии D-Bus или ключ заблокирован?)."
+    return 1
+  fi
+  (( rc == 0 )) && say "Готово: RU первая и активна, US вторая."
+  return $rc
+}
+
+# Режим автозапуска: тихо, с ожиданием gsettings и повторной проверкой,
+# если сессия (например, шаблоны профиля Calculate) перезапишет порядок после входа.
+login_apply() {
+  QUIET=1
+  log_line "Вход в сессию: desktop='${XDG_CURRENT_DESKTOP:-}', type='$(session_type)'"
+  if ! is_cinnamon_session; then
+    log_line "Сессия не Cinnamon — пропуск."
+    return 0
+  fi
+  local waited=0 timeout=${CLDC_WAIT_TIMEOUT:-30} rc d
+  until gs_init; do
+    if (( waited >= timeout )); then
+      log_line "ОШИБКА: gsettings недоступен — пропуск."
+      return 1
+    fi
+    sleep 1
+    (( waited++ ))
+  done
+  acquire_lock
+  run_apply
+  rc=$?
+  (( rc == 2 )) && return $rc
+  # Повторно меняем только порядок; current не трогаем, чтобы не мешать Super+Space.
+  for d in ${CLDC_RECHECK_DELAYS:-5 20}; do
+    sleep "$d"
+    detect_backend
+    build_plan || continue
+    if plan_has sources || plan_has layouts; then
+      log_line "Порядок раскладок изменён после входа — повторное применение."
+      run_apply
+      rc=$?
+    fi
+  done
+  return $rc
+}
+
+# ---------------------------------------------------------------- команды
+
+desktop_entry() {
+  cat <<EOF
+[Desktop Entry]
+Type=Application
+Name=CLDC Russian Default
+Name[ru]=Русская раскладка по умолчанию
+Comment=Makes the RU layout first and active at Cinnamon login
+Comment[ru]=Делает раскладку RU первой и активной при входе в Cinnamon
+Exec=bash "$INSTALL_PATH" apply --login
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=3
+# $MARKER $APP_VERSION
+EOF
+}
+
+self_path() {
+  local p=${BASH_SOURCE[0]}
+  if readlink -f -- "$p" >/dev/null 2>&1; then
+    readlink -f -- "$p"
+  else
+    printf '%s/%s' "$(cd "$(dirname -- "$p")" && pwd)" "$(basename -- "$p")"
+  fi
+}
+
+cmd_install() {
+  local opt no_apply=0
+  for opt; do
+    case $opt in
+      --no-apply) no_apply=1 ;;
+      *) die "Неизвестный параметр install: $opt" 2 ;;
+    esac
+  done
+  check_not_root
+  local user
+  user=$(id -un 2>/dev/null || printf '%s' "${USER:-?}")
+  [[ $user == guest ]] ||
+    warn "Текущий пользователь — '$user', а не guest. Установка будет выполнена для '$user'."
+  case $INSTALL_PATH in
+    *[\"\`\$\\%]* | *$'\n'*) die "Путь установки содержит недопустимые символы: $INSTALL_PATH" ;;
+  esac
+
+  local src tmp
+  src=$(self_path)
+  mkdir -p "${INSTALL_PATH%/*}" "${AUTOSTART_FILE%/*}" "$STATE_DIR" ||
+    die "Не удалось создать каталоги в профиле пользователя."
+
+  if [[ $src -ef $INSTALL_PATH ]]; then
+    say "Скрипт уже на месте: $INSTALL_PATH"
+  else
+    tmp="$INSTALL_PATH.tmp.$$"
+    if cp -f -- "$src" "$tmp" && chmod 755 "$tmp" && mv -f -- "$tmp" "$INSTALL_PATH"; then
+      say "Скрипт установлен: $INSTALL_PATH"
+    else
+      rm -f -- "$tmp"
+      die "Не удалось скопировать скрипт в $INSTALL_PATH"
+    fi
+  fi
+
+  if [[ -e $AUTOSTART_FILE ]] && ! grep -qF "$MARKER" "$AUTOSTART_FILE"; then
+    cp -f -- "$AUTOSTART_FILE" "$STATE_DIR/autostart-foreign.desktop.bak"
+    warn "Чужой $AUTOSTART_FILE сохранён в $STATE_DIR/autostart-foreign.desktop.bak"
+  fi
+  tmp="$AUTOSTART_FILE.tmp.$$"
+  if desktop_entry >"$tmp" && mv -f -- "$tmp" "$AUTOSTART_FILE"; then
+    say "Автозапуск: $AUTOSTART_FILE"
+  else
+    rm -f -- "$tmp"
+    die "Не удалось создать $AUTOSTART_FILE"
+  fi
+
+  if (( no_apply )); then
+    say "Настройки будут применены при следующем входе в Cinnamon."
+  elif gs_init; then
+    say "Применяю настройки сейчас..."
+    acquire_lock
+    run_apply || warn "Сейчас применить не удалось — повторная попытка будет при следующем входе."
+  else
+    say "gsettings недоступен — настройки будут применены при следующем входе в Cinnamon."
+  fi
+  say "Установка завершена. Проверка: $INSTALL_PATH status"
+}
+
+cmd_apply() {
+  local opt login=0
+  for opt; do
+    case $opt in
+      --login) login=1 ;;
+      -n | --dry-run) DRY_RUN=1 ;;
+      -q | --quiet) QUIET=1 ;;
+      *) die "Неизвестный параметр apply: $opt" 2 ;;
+    esac
+  done
+  check_not_root
+  if (( login )); then
+    login_apply
+    local rc=$?
+    trim_log
+    return $rc
+  fi
+  is_cinnamon_session ||
+    warn "Сессия не похожа на Cinnamon (XDG_CURRENT_DESKTOP='${XDG_CURRENT_DESKTOP:-}'). Значения будут записаны в GSettings."
+  gs_init || die "gsettings недоступен (нужен пакет glib и сеанс пользователя)."
+  acquire_lock
+  run_apply
+}
+
+cmd_restore() {
+  check_not_root
+  local which=${1:-original} f
+  case $which in
+    original) f="$BACKUP_DIR/original.tsv" ;;
+    latest) f=$(latest_backup) ;;
+    *) f=$which ;;
+  esac
+  [[ -n $f && -f $f ]] || die "Резервная копия не найдена: ${f:-<нет копий>}"
+  gs_init || die "gsettings недоступен."
+  acquire_lock
+  say "Восстановление из $f"
+  restore_from "$f" || return 1
+  [[ -f $AUTOSTART_FILE ]] &&
+    warn "Автозапуск включён: при следующем входе RU снова станет первой. Отключить: $APP_NAME uninstall"
+  return 0
+}
+
+cmd_uninstall() {
+  local opt restore=0 purge=0
+  for opt; do
+    case $opt in
+      --restore) restore=1 ;;
+      --purge) purge=1 ;;
+      *) die "Неизвестный параметр uninstall: $opt" 2 ;;
+    esac
+  done
+  check_not_root
+  if (( restore )); then
+    if [[ -f $BACKUP_DIR/original.tsv ]]; then
+      gs_init || die "gsettings недоступен — восстановление невозможно, удаление отменено."
+      acquire_lock
+      restore_from "$BACKUP_DIR/original.tsv" || die "Восстановление не удалось, удаление отменено."
+    else
+      say "Исходной резервной копии нет — восстанавливать нечего."
+    fi
+  fi
+
+  local f
+  for f in "$AUTOSTART_FILE" "$INSTALL_PATH"; do
+    [[ -e $f ]] || continue
+    if grep -qF "$MARKER" "$f"; then
+      rm -f -- "$f" && say "Удалено: $f"
+    else
+      warn "Файл $f создан не этой утилитой — не удаляю."
+    fi
+  done
+
+  if (( purge )); then
+    case $STATE_DIR in
+      */"$APP_NAME")
+        local dir=$STATE_DIR
+        STATE_DIR=""   # больше не пишем журнал, иначе каталог создастся заново
+        rm -rf -- "$dir" && say "Удалены журнал и резервные копии: $dir"
+        ;;
+    esac
+  elif [[ -d $BACKUP_DIR ]]; then
+    say "Резервные копии сохранены: $BACKUP_DIR (удалить: uninstall --purge)"
+  fi
+  say "Удаление завершено. Настройки раскладок$( (( restore )) || printf ' не') возвращались к исходным."
+}
+
+cmd_status() {
+  local rc=0 user v st
+  user=$(id -un 2>/dev/null || printf '%s' "${USER:-?}")
+  st=$(session_type)
+  printf '%s %s\n' "$APP_NAME" "$APP_VERSION"
+  printf 'Пользователь:  %s\n' "$user"
+  printf 'Рабочий стол:  %s\n' "${XDG_CURRENT_DESKTOP:-не определён}"
+  printf 'Тип сессии:    %s\n' "$st"
+  if command -v cinnamon >/dev/null 2>&1; then
+    printf 'Cinnamon:      %s\n' "$(cinnamon --version 2>/dev/null)"
+  fi
+  printf 'Локаль:        %s (не изменяется)\n' "${LC_ALL:-${LANG:-не задана}}"
+
+  local inst="нет" auto="нет"
+  [[ -f $INSTALL_PATH ]] && inst="$INSTALL_PATH"
+  if [[ -f $AUTOSTART_FILE ]] && grep -qF "$MARKER" "$AUTOSTART_FILE"; then
+    auto="$AUTOSTART_FILE"
+    grep -qi '^Hidden=true' "$AUTOSTART_FILE" && auto+=" (ОТКЛЮЧЁН в «Автозапуске»)"
+  fi
+  printf 'Скрипт:        %s\n' "$inst"
+  printf 'Автозапуск:    %s\n' "$auto"
+
+  if ! gs_init; then
+    printf 'gsettings:     недоступен — проверка невозможна\n'
+    return 2
+  fi
+  [[ ${GSETTINGS_BACKEND:-} == memory ]] &&
+    printf 'ВНИМАНИЕ: GSETTINGS_BACKEND=memory — настройки не сохраняются.\n'
+
+  detect_backend
+  printf 'Механизм:      %s\n' "$(backend_label)"
+  local key
+  case $BACKEND in
+    input-sources)
+      for key in sources current mru-sources per-window xkb-options; do
+        has_key "$S_IS" "$key" || continue
+        v=""
+        [[ $key == per-window || $key == xkb-options ]] && v=" (не изменяется)"
+        printf '  %-12s %s%s\n' "$key:" "$(gs_get "$S_IS" "$key")" "$v"
+      done
+      if has_key "$S_KEYS" switch-input-source; then
+        v=$(gs_get "$S_KEYS" switch-input-source)
+        printf 'Переключение:  %s (не изменяется)\n' "$v"
+        [[ ${v,,} == *'<super>space'* ]] ||
+          printf '  Super+Space не найден в %s switch-input-source.\n' "$S_KEYS"
+      fi
+      has_key "$S_KBD" layouts &&
+        printf 'libgnomekbd:   %s (не используется этим механизмом)\n' "$(gs_get "$S_KBD" layouts)"
+      ;;
+    libgnomekbd)
+      printf '  %-14s %s\n' "layouts:" "$(gs_get "$S_KBD" layouts)"
+      has_key "$S_KBD" options &&
+        printf '  %-14s %s (не изменяется)\n' "options:" "$(gs_get "$S_KBD" options)"
+      for key in group-per-window default-group; do
+        has_key "$S_KBD_DESK" "$key" &&
+          printf '  %-14s %s\n' "$key:" "$(gs_get "$S_KBD_DESK" "$key")"
+      done
+      ;;
+  esac
+
+  if can_query_xkb; then
+    printf 'XKB сейчас (setxkbmap -query, только чтение):\n'
+    setxkbmap -query 2>/dev/null | grep -E '^(layout|variant|options):' | sed 's/^/  /'
+  elif [[ $st == wayland ]]; then
+    printf 'XKB:           Wayland — раскладками управляет Cinnamon, setxkbmap не используется\n'
+  fi
+
+  local n=0 f
+  for f in "$BACKUP_DIR"/[0-9]*.tsv; do [[ -f $f ]] && (( n++ )); done
+  printf 'Копии:         %s шт. в %s%s\n' "$n" "$BACKUP_DIR" \
+    "$([[ -f $BACKUP_DIR/original.tsv ]] && printf ', исходная: original.tsv')"
+  if [[ -f $LOG_FILE ]]; then
+    printf 'Журнал (последние строки, %s):\n' "$LOG_FILE"
+    tail -n 3 "$LOG_FILE" | sed 's/^/  /'
+  fi
+
+  if [[ $BACKEND == none ]]; then
+    printf 'Итог: схемы раскладок Cinnamon не найдены.\n'
+    return 2
+  fi
+  QUIET=1
+  if ! build_plan; then
+    printf 'Итог: не удалось прочитать настройки раскладок.\n'
+    return 2
+  fi
+  if plan_has sources || plan_has layouts || plan_has default-group; then
+    printf 'Итог: НУЖНО ПРИМЕНИТЬ — RU не первая или US не вторая. Выполните: %s apply\n' "$APP_NAME"
+    rc=3
+  elif plan_has current || plan_has mru-sources; then
+    printf 'Итог: порядок верный (RU, US), но сейчас активна не RU — вероятно, переключено вручную.\n'
+    printf '      При следующем входе будет RU. Сразу: %s apply\n' "$APP_NAME"
+  else
+    printf 'Итог: OK — RU первая и активна, US вторая.\n'
+  fi
+  if [[ $auto == нет ]]; then
+    printf 'Автозапуск не установлен: выполните %s install\n' "$APP_NAME"
+    rc=3
+  fi
+  return $rc
+}
+
+usage() {
+  cat <<EOF
+$APP_NAME $APP_VERSION — русская раскладка по умолчанию в Cinnamon
+
+Использование: $APP_NAME КОМАНДА [ПАРАМЕТРЫ]
+
+  install [--no-apply]        установить в ~/.local/bin и ~/.config/autostart,
+                              сразу применить настройки (без sudo)
+  apply [--dry-run] [--quiet] сделать RU первой и активной, US второй
+  apply --login               режим автозапуска (тихо, с повторной проверкой)
+  status                      показать состояние (код 0 — OK, 3 — нужно действие)
+  restore [original|latest|ФАЙЛ]
+                              восстановить настройки из резервной копии
+                              (по умолчанию — исходные, до первого изменения)
+  uninstall [--restore] [--purge]
+                              убрать автозапуск и скрипт; --restore вернуть
+                              исходные настройки; --purge удалить журнал и копии
+  version | help
+
+Данные: ${STATE_DIR/#$HOME/\~} (журнал и резервные копии)
+EOF
+}
+
+main() {
+  init_paths
+  local cmd=${1:-help}
+  (( $# )) && shift
+  case $cmd in
+    install) cmd_install "$@" ;;
+    apply) cmd_apply "$@" ;;
+    status) cmd_status "$@" ;;
+    restore) cmd_restore "$@" ;;
+    uninstall | remove) cmd_uninstall "$@" ;;
+    version | --version | -V) printf '%s %s\n' "$APP_NAME" "$APP_VERSION" ;;
+    help | --help | -h) usage ;;
+    *) usage >&2; return 2 ;;
+  esac
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"; exit $?
+fi
