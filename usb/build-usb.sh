@@ -20,6 +20,13 @@ FILES=(
   "ИНСТРУКЦИЯ.html"
   "ИНСТРУКЦИЯ.txt"
   "app/usb-launcher.sh"
+  "app/img/01-copy-folder.jpg"
+  "app/img/02-open-installer.jpg"
+  "app/img/03-trust-launcher.jpg"
+  "app/img/04-trusted-icon.jpg"
+  "app/img/05-install-done.jpg"
+  "app/img/06-open-check.jpg"
+  "app/img/07-check-ok.jpg"
 )
 EXECUTABLE=(
   "Установить.desktop"
@@ -34,7 +41,7 @@ winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else pr
 
 echo "Сборка $NAME"
 rm -rf -- "$OUT" "$ZIP"
-mkdir -p "$OUT/app"
+mkdir -p "$OUT/app/img"
 for f in "${FILES[@]}"; do
   [[ -f $SRC/$f ]] || fail "нет исходного файла usb/$f"
   cp -- "$SRC/$f" "$OUT/$f"
@@ -52,11 +59,16 @@ echo "  состав: $(wc -l <<<"$actual" | tr -d ' ') файлов"
 
 # 2. Переводы строк Linux и без BOM
 while IFS= read -r f; do
+  [[ $f == *.jpg ]] && continue   # картинки — двоичные файлы
   # tr, а не grep: grep в Git Bash на Windows не видит \r
   [[ -z $(tr -cd '\r' <"$OUT/$f") ]] || fail "CRLF в $f"
   [[ $(head -c 3 "$OUT/$f" | od -An -tx1 | tr -d ' \n') != efbbbf ]] || fail "BOM в $f"
 done <<<"$actual"
 echo "  переводы строк: LF, без BOM"
+grep -o 'src="app/img/[^"]*"' "$OUT/ИНСТРУКЦИЯ.html" | sed 's/^src="//; s/"$//' | while IFS= read -r img; do
+  [[ -f $OUT/$img ]] || fail "ИНСТРУКЦИЯ.html ссылается на отсутствующий $img"
+done
+echo "  картинки инструкции: на месте"
 
 # 3. Синтаксис Bash
 for f in "Установить.sh" "app/usb-launcher.sh" "app/cldc-russian-default"; do

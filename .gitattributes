@@ -2,3 +2,5 @@
 cldc-russian-default text eol=lf
 *.sh text eol=lf
 tests/mock-bin/* text eol=lf
+*.png binary
+*.jpg binary

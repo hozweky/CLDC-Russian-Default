@@ -58,7 +58,7 @@ assert_true "папка собрана" test -d "$PKG"
 assert_true "ZIP собран" test -s "$ZIP"
 assert_true "программа в пакете не изменена" cmp -s "$ROOT/cldc-russian-default" "$PKG/app/cldc-russian-default"
 assert_true "запускатель в пакете не изменён" cmp -s "$ROOT/usb/app/usb-launcher.sh" "$PKG/app/usb-launcher.sh"
-no_cr() { local f; while IFS= read -r -d '' f; do [[ -z $(tr -cd '\r' <"$f") ]] || return 1; done < <(find "$PKG" -type f -print0); }
+no_cr() { local f; while IFS= read -r -d '' f; do [[ -z $(tr -cd '\r' <"$f") ]] || return 1; done < <(find "$PKG" -type f ! -name '*.jpg' -print0); }
 assert_true "нет CRLF в пакете" no_cr
 
 PY=""
@@ -74,7 +74,8 @@ for i in zipfile.ZipFile(sys.argv[1]).infolist():
   assert_true "ZIP: «Установить.desktop» 755" grep -qxF "755 1 CLDC-Russian-Default-USB/Установить.desktop" <<<"$listing"
   assert_true "ZIP: программа 755" grep -qxF "755 0 CLDC-Russian-Default-USB/app/cldc-russian-default" <<<"$listing"
   assert_true "ZIP: инструкция 644" grep -qxF "644 1 CLDC-Russian-Default-USB/ИНСТРУКЦИЯ.html" <<<"$listing"
-  assert_eq "ZIP: 7 файлов" 7 "$(wc -l <<<"$listing" | tr -d ' ')"
+  assert_true "ZIP: картинка инструкции 644" grep -qxF "644 0 CLDC-Russian-Default-USB/app/img/03-trust-launcher.jpg" <<<"$listing"
+  assert_eq "ZIP: 14 файлов" 14 "$(wc -l <<<"$listing" | tr -d ' ')"
 else
   echo "  (python не найден — проверка содержимого ZIP пропущена)"
 fi
